@@ -9,6 +9,7 @@ A comprehensive automated system that researches trending topics, writes scripts
 - FFmpeg installed on system
 - OpenAI API key
 - YouTube API credentials
+- Optional: Pexels API key for stock visuals
 
 ### Installation
 
@@ -90,6 +91,11 @@ python cli.py seed-ideas --channel ByteCult --count 50
 python cli.py oauth-youtube --channel ByteCult
 ```
 
+**Setup character assets:**
+```bash
+python cli.py setup-characters
+```
+
 **Schedule daily runs:**
 ```bash
 python cli.py schedule --daily 09:00 --per-channel 1
@@ -161,8 +167,13 @@ curl "http://localhost:8000/ideas?channel=ByteCult&limit=20"
 5. **Video Composition** (`video/`)
    - FFmpeg-based video rendering
    - 9:16 aspect ratio optimization for Shorts
-   - Style presets with customizable fonts and colors
-   - Caption burn-in with safe areas
+   - Enhanced visual composition with:
+     - Gradient/solid color backgrounds
+     - Automated title cards
+     - Stock image/video integration
+     - Character PNG overlays with pose switching
+     - Comic-style speech bubbles
+     - Background music integration
 
 6. **Publishing** (`publish/`)
    - YouTube API integration with OAuth
@@ -237,16 +248,34 @@ Video Composition → Publishing → Analytics Collection → Learning
 2. Set up YouTube OAuth: `python cli.py oauth-youtube --channel NewChannel`
 3. Test with dry run: `python cli.py run-once --channel NewChannel --dry-run`
 
+### Custom Characters
+1. Add PNG files with transparent backgrounds to `data/assets/characters/`
+2. Recommended size: 300x300 pixels or larger
+3. Name descriptively (e.g., 'happy_character.png', 'thinking_character.png')
+4. The system automatically cycles through available characters
+
+### Background Music
+1. Add royalty-free music files to `data/assets/music/`
+2. Supported formats: MP3, WAV, M4A
+3. Name files descriptively for automatic selection
+4. System generates simple ambient music if none provided
+
 ### Custom Styles
-Edit `config/styles.json`:
+Edit `config/styles.json` for enhanced visual customization:
 ```json
 {
   "my-style": {
     "font_family": "Arial-Bold",
-    "font_size": 84,
+    "font_size": 88,
     "text_color": "#FFFFFF",
     "stroke_width": 3,
-    "stroke_color": "#000000"
+    "stroke_color": "#000000",
+    "background_type": "gradient",
+    "background_gradient": "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+    "title_font_size": 120,
+    "character_size": 300,
+    "character_position": "bottom-right",
+    "speech_bubble_font_size": 48
   }
 }
 ```
@@ -307,7 +336,9 @@ curl http://localhost:8000/health
 - A/B testing for hooks and thumbnails
 - Trend memory to avoid repetitive content
 - Webhook notifications for Discord/Slack
-- Custom thumbnail generation
+- Enhanced visual composition with characters and speech bubbles
+- Automatic stock visual integration
+- Dynamic background generation
 
 ## 🤝 Contributing
 

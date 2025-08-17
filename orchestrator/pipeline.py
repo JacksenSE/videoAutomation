@@ -17,6 +17,7 @@ from analytics.learn import LearningEngine
 from models.db import get_db, PipelineJobDB, TopicIdeaDB, ScriptPackageDB
 from loguru import logger
 import os
+import subprocess
 import json
 from dotenv import load_dotenv
 
@@ -199,7 +200,6 @@ class VideoGenerationPipeline:
                         used=False
                     )
                     db.add(db_idea)
-                
                 await db.commit()
             
             return ranked_ideas
@@ -293,11 +293,15 @@ class VideoGenerationPipeline:
         voiceover: Voiceover
     ) -> AssetBundle:
         """Gather B-roll clips and generate captions"""
-        # Get B-roll clips
+        # Get enhanced keywords from script for better visual matching
+        script_keywords = self.broll_provider.get_topic_keywords_from_script(script_package.script_text)
+        combined_keywords = list(set(idea.keywords + script_keywords))
+        
+        # Get B-roll clips and stock images
         video_clips = await self.broll_provider.fetch_broll_clips(
-            idea.keywords,
+            combined_keywords,
             script_package.title,
-            count=4,
+            count=6,  # Get more assets for enhanced composition
             duration_range=(6, 12)
         )
         
@@ -308,8 +312,8 @@ class VideoGenerationPipeline:
             voiceover
         )
         
-        # Optional: add background music (placeholder)
-        music_path = None  # Could fetch from music library
+        # Add royalty-free background music
+        music_path = await self._get_background_music(script_package.title)
         
         return AssetBundle(
             video_clips=video_clips,
@@ -398,6 +402,142 @@ class VideoGenerationPipeline:
         
         logger.info(f"Analytics collection scheduled for video {video_id}")
 
+    async def dry_run(self, channel_name: str) -> Dict:
+        """Run pipeline in dry mode (no publishing). Defensive: never indexes lists."""
+        try:
+            logger.info(f"Starting dry run for channel {channel_name}")
+
+            # 0) Load channel config
+            channel_config = self.channels_config.get(channel_name)
+            if not channel_config:
+                return {"error": f"Channel '{channel_name}' not found in configuration"}
+
+            niche = (channel_config.get("niche") or "").strip()
+            banned_terms = channel_config.get("banned_terms", [])
+
+            # 1) Gather ideas (coerce to list)
+            async with TopicGatherer() as gatherer:
+                ideas_raw = await gatherer.gather_for_channel(niche, 10)
+            ideas = list(ideas_raw or [])
+            logger.info(f"Gathered {len(ideas)} raw ideas for {channel_name}")
+
+            if not ideas:
+                return {"error": f"No topics found for channel '{channel_name}' (gather returned 0)"}
+
+            # 2) Score & rank with robust fallback (and coerce to list)
+            try:
+                ranked_raw = self.topic_scorer.score_and_rank(ideas, channel_name)
+            except Exception as e:
+                logger.warning(f"[dry_run] scorer failed, falling back to raw ideas: {e}")
+                ranked_raw = ideas
+
+            ranked_ideas = list(ranked_raw or [])
+            if not ranked_ideas:
+                return {"error": f"No usable topics for '{channel_name}' after scoring/fallback"}
+
+            # Ensure sorted by score desc if scorer didn't sort
+            try:
+                ranked_ideas.sort(key=lambda i: getattr(i, "score", 0.0), reverse=True)
+            except Exception:
+                pass
+
+            # 3) Pick best idea WITHOUT indexing
+            best_idea = next((i for i in ranked_ideas if i is not None), None)
+            if best_idea is None:
+                return {"error": "Internal: ranked ideas contained no usable item"}
+
+            # Normalize fragile fields so downstream calls don't choke
+            if not getattr(best_idea, "title", None):
+                setattr(best_idea, "title", "Trending update")
+            if not getattr(best_idea, "keywords", None):
+                setattr(best_idea, "keywords", ["trending"])
+            if not getattr(best_idea, "angle", None):
+                setattr(best_idea, "angle", "latest update")
+
+            logger.debug(f"[dry_run] chosen idea title: {getattr(best_idea, 'title', '<no title>')}")
+
+            # 4) Generate script (one retry with light normalization)
+            script_package = None
+            last_err = None
+            for attempt in (1, 2):
+                try:
+                    script_package = await self.script_writer.create_script_package(
+                        best_idea, niche, banned_terms
+                    )
+                    if script_package:
+                        break
+                except Exception as e:
+                    last_err = e
+                    logger.warning(f"[dry_run] script generation error (attempt {attempt}): {e}")
+                    if attempt == 1:
+                        # Nudge inputs a bit for the retry
+                        if not getattr(best_idea, "keywords", None):
+                            setattr(best_idea, "keywords", ["news"])
+                        if not getattr(best_idea, "angle", None):
+                            setattr(best_idea, "angle", "breaking update")
+
+            if not script_package:
+                return {"error": f"Script generation failed{': ' + str(last_err) if last_err else ''}"}
+
+            # 5) Optional short sample VO (Edge TTS). Any failure is non-fatal.
+            voiceover = None
+            test_text = script_package.hook or script_package.title or ""
+            if test_text:
+                try:
+                    voiceover = await self.edge_tts.generate_voiceover(test_text)
+                except Exception as e:
+                    logger.warning(f"[dry_run] sample TTS failed (non-fatal): {e}")
+
+            # 6) Optional visual hint (non-fatal)
+            visual_hint = {}
+            try:
+                vis_kw = self.broll_provider.get_topic_keywords_from_script(
+                    script_package.script_text
+                ) or []
+                visual_hint = {
+                    "candidate_keywords": list(vis_kw)[:5],
+                    "style": channel_config.get("style", "clean-bold"),
+                }
+            except Exception as e:
+                logger.debug(f"[dry_run] visual hint extraction failed (non-fatal): {e}")
+
+            # 7) Build response
+            result = {
+                "channel": channel_name,
+                "selected_topic": {
+                    "title": getattr(best_idea, "title", ""),
+                    "score": float(getattr(best_idea, "score", 0.0) or 0.0),
+                    "keywords": list(getattr(best_idea, "keywords", []) or []),
+                },
+                "script": {
+                    "title": getattr(script_package, "title", ""),
+                    "hook": getattr(script_package, "hook", ""),
+                    "word_count": int(getattr(script_package, "word_count", 0) or 0),
+                    "hashtags": list(getattr(script_package, "hashtags", []) or []),
+                },
+                "voiceover": {
+                    "generated": bool(voiceover),
+                    "duration": float(getattr(voiceover, "duration_sec", 0.0) or 0.0),
+                    "provider": getattr(voiceover, "provider", None),
+                },
+                "visual_elements": visual_hint,
+                "status": "dry_run_complete",
+            }
+
+            # 8) Cleanup VO temp file if present
+            try:
+                vo_path = getattr(voiceover, "path", None)
+                if vo_path and os.path.exists(vo_path):
+                    os.remove(vo_path)
+            except Exception:
+                pass
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Dry run failed: {e}")
+            return {"error": str(e)}
+
     async def _update_job_topic(self, job_id: str, topic_id: str):
         """Update job with selected topic"""
         async for db in get_db():
@@ -443,70 +583,112 @@ class VideoGenerationPipeline:
             await db.commit()
 
     async def dry_run(self, channel_name: str) -> Dict:
-        """Run pipeline in dry mode (no publishing)"""
+        """Run pipeline in dry mode (no publishing). Never indexes empty lists."""
         try:
             logger.info(f"Starting dry run for channel {channel_name}")
-            
+
+            # 0) Load channel config
             channel_config = self.channels_config.get(channel_name)
             if not channel_config:
-                return {"error": f"Channel {channel_name} not found"}
-            
-            # Research topics
+                return {"error": f"Channel '{channel_name}' not found in configuration"}
+
+            niche = channel_config.get("niche", "").strip()
+            banned_terms = channel_config.get("banned_terms", [])
+
+            # 1) Gather ideas
             async with TopicGatherer() as gatherer:
-                ideas = await gatherer.gather_for_channel(
-                    channel_config["niche"], 10
-                )
-            
+                ideas = await gatherer.gather_for_channel(niche, 10)
+
             if not ideas:
-                return {"error": "No topics found"}
-            
-            ranked_ideas = self.topic_scorer.score_and_rank(ideas, channel_name)
+                logger.warning(f"Gather returned 0 ideas for niche='{niche}'")
+                return {"error": f"No topics found for channel '{channel_name}' (gather returned 0)"}
+
+            logger.info(f"Gathered {len(ideas)} raw ideas for {channel_name}")
+
+            # 2) Score & rank (with fallback)
+            ranked_ideas = self.topic_scorer.score_and_rank(ideas, channel_name) or []
+            logger.info(f"Scorer produced {len(ranked_ideas)} ranked ideas")
+
+            if not ranked_ideas:
+                logger.warning("Scoring returned 0 ideas — falling back to raw ideas")
+                ranked_ideas = ideas
+
+            if not ranked_ideas:
+                # Double-guard: if both are empty, bail gracefully
+                return {"error": f"No usable topics for '{channel_name}' after scoring/fallback"}
+
+            # 3) Pick best idea (safe now)
             best_idea = ranked_ideas[0]
-            
-            # Generate script
+            logger.debug(f"Chosen idea: {getattr(best_idea, 'title', '<no title>')}")
+
+            # 4) Generate script
             script_package = await self.script_writer.create_script_package(
                 best_idea,
-                channel_config["niche"],
-                channel_config["banned_terms"]
+                niche,
+                banned_terms
             )
-            
             if not script_package:
                 return {"error": "Script generation failed"}
-            
-            # Test TTS (short sample)
-            test_text = script_package.hook
-            voiceover = await self.edge_tts.generate_voiceover(test_text)
-            
+
+            # 5) Generate a short sample voiceover (Edge TTS is fine for dry runs)
+            test_text = script_package.hook or script_package.title or ""
+            voiceover = None
+            if test_text:
+                try:
+                    voiceover = await self.edge_tts.generate_voiceover(test_text)
+                except Exception as e:
+                    logger.warning(f"Sample TTS failed in dry run: {e}")
+
+            # 6) Build result object (matches your CLI expectations)
             result = {
                 "channel": channel_name,
                 "selected_topic": {
-                    "title": best_idea.title,
-                    "score": best_idea.score,
-                    "keywords": best_idea.keywords
+                    "title": getattr(best_idea, "title", ""),
+                    "score": getattr(best_idea, "score", 0.0),
+                    "keywords": getattr(best_idea, "keywords", []),
                 },
                 "script": {
                     "title": script_package.title,
                     "hook": script_package.hook,
                     "word_count": script_package.word_count,
-                    "hashtags": script_package.hashtags
+                    "hashtags": script_package.hashtags,
                 },
                 "voiceover": {
-                    "generated": voiceover is not None,
-                    "duration": voiceover.duration_sec if voiceover else 0,
-                    "provider": voiceover.provider if voiceover else None
+                    "generated": bool(voiceover),
+                    "duration": getattr(voiceover, "duration_sec", 0.0),
+                    "provider": getattr(voiceover, "provider", None),
                 },
-                "status": "dry_run_complete"
+                "status": "dry_run_complete",
             }
-            
-            # Cleanup test files
-            if voiceover and os.path.exists(voiceover.path):
-                os.remove(voiceover.path)
-            
+
+            # Optional preview of how visuals would be assembled (purely informative)
+            try:
+                # Derive 3–5 visual keywords from the script to show intent
+                vis_keywords = self.broll_provider.get_topic_keywords_from_script(
+                    script_package.script_text
+                )
+                result["visual_elements"] = {
+                    "candidate_keywords": vis_keywords[:5],
+                    "style": channel_config.get("style", "clean-bold"),
+                }
+            except Exception:
+                # Non-fatal if keyword extraction fails
+                pass
+
+            # 7) Cleanup temp sample VO if created
+            if voiceover and getattr(voiceover, "path", None):
+                try:
+                    if os.path.exists(voiceover.path):
+                        os.remove(voiceover.path)
+                except Exception:
+                    pass
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Dry run failed: {e}")
             return {"error": str(e)}
+
 
     def get_pipeline_status(self) -> Dict:
         """Get current pipeline status"""

@@ -106,6 +106,9 @@ def run_once(
                 typer.echo(f"Script title: {result['script']['title']}")
                 typer.echo(f"Word count: {result['script']['word_count']}")
                 typer.echo(f"Voiceover: {result['voiceover']['provider']} ({result['voiceover']['duration']:.1f}s)")
+                    
+                if 'visual_elements' in result:
+                        typer.echo(f"Visual elements: {result['visual_elements']}")
             else:
                 typer.echo(f"🚀 Running full pipeline for {channel}...")
                 
@@ -125,6 +128,33 @@ def run_once(
     
     asyncio.run(run_pipeline())
 
+@app.command()
+def setup_characters():
+    """Set up character assets for video composition"""
+    try:
+        characters_dir = "./data/assets/characters"
+        os.makedirs(characters_dir, exist_ok=True)
+        
+        typer.echo("🎭 Setting up character assets...")
+        typer.echo(f"Characters directory: {characters_dir}")
+        typer.echo("\nTo add custom characters:")
+        typer.echo("1. Add PNG files with transparent backgrounds to the characters directory")
+        typer.echo("2. Name them descriptively (e.g., 'happy_character.png', 'excited_character.png')")
+        typer.echo("3. Recommended size: 300x300 pixels or larger")
+        typer.echo("4. The system will automatically cycle through available characters")
+        
+        # Check existing characters
+        existing_chars = [f for f in os.listdir(characters_dir) if f.endswith('.png')]
+        if existing_chars:
+            typer.echo(f"\nFound {len(existing_chars)} existing characters:")
+            for char in existing_chars:
+                typer.echo(f"  • {char}")
+        else:
+            typer.echo("\nNo custom characters found. Default geometric shapes will be used.")
+            
+    except Exception as e:
+        typer.echo(f"❌ Error: {e}", err=True)
+        raise typer.Exit(1)
 @app.command()
 def schedule(
     daily: str = typer.Option("09:00", "--daily", help="Daily run time (HH:MM)"),
