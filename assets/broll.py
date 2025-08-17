@@ -3,6 +3,7 @@ import asyncio
 import aiohttp
 import json
 import random
+import re
 from typing import List, Optional
 from urllib.parse import urlencode
 from loguru import logger
@@ -37,6 +38,11 @@ class BRollProvider:
         if len(clips) < count:
             local_clips = self._get_local_stock_clips(keywords, niche, count - len(clips))
             clips.extend(local_clips)
+        
+        # Try to get stock images as well for middle section
+        if self.pexels_api_key:
+            stock_images = await self._fetch_stock_images(keywords, niche, 2)
+            clips.extend(stock_images)
         
         # Generate abstract backgrounds if still not enough
         if len(clips) < count:
@@ -98,6 +104,82 @@ class BRollProvider:
             logger.error(f"Error fetching from Pexels: {e}")
         
         return clips
+
+    async def _fetch_stock_images(self, keywords: List[str], niche: str, count: int) -> List[str]:
+        """Fetch stock images from Pexels API for middle section visuals"""
+        images = []
+        
+        try:
+            # Create search query
+            search_terms = self._get_search_terms_for_niche(niche) + keywords
+            query = " ".join(search_terms[:3])
+            
+            headers = {
+                'Authorization': self.pexels_api_key,
+                'User-Agent': 'AutoShorts/1.0'
+            }
+            
+            params = {
+                'query': query,
+                'orientation': 'landscape',  # Good for middle section
+                'size': 'large',
+                'per_page': min(count * 2, 15)
+            }
+            
+            url = f"https://api.pexels.com/v1/search?{urlencode(params)}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        photos = data.get('photos', [])
+                        
+                        for photo in photos:
+                            if len(images) >= count:
+                                break
+                            
+                            # Get medium size image
+                            image_url = photo['src']['large']
+                            
+                            # Download and save locally
+                            local_path = await self._download_image(
+                                image_url, 
+                                f"pexels_img_{photo['id']}.jpg"
+                            )
+                            if local_path:
+                                images.append(local_path)
+                    
+                    else:
+                        logger.warning(f"Pexels Images API returned status {response.status}")
+        
+        except Exception as e:
+            logger.error(f"Error fetching stock images from Pexels: {e}")
+        
+        return images
+
+    async def _download_image(self, url: str, filename: str) -> Optional[str]:
+        """Download image file to local storage"""
+        try:
+            output_path = os.path.join(self.local_assets_dir, filename)
+            
+            # Skip if already downloaded
+            if os.path.exists(output_path):
+                return output_path
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        with open(output_path, 'wb') as f:
+                            async for chunk in response.content.iter_chunked(8192):
+                                f.write(chunk)
+                        
+                        logger.info(f"Downloaded stock image: {filename}")
+                        return output_path
+        
+        except Exception as e:
+            logger.error(f"Error downloading image {url}: {e}")
+        
+        return None
 
     def _find_suitable_video_file(self, video_files: List[dict]) -> Optional[dict]:
         """Find the most suitable video file from Pexels response"""
@@ -220,6 +302,31 @@ class BRollProvider:
                 return terms
         
         return ['abstract', 'background', 'minimal']  # Default fallback
+
+    def get_topic_keywords_from_script(self, script_text: str) -> List[str]:
+        """Extract visual keywords from script for better B-roll matching"""
+        # Extract nouns and important terms that would make good visuals
+        visual_keywords = []
+        
+        # Common visual terms that work well for stock footage
+        visual_terms = [
+            'technology', 'computer', 'phone', 'app', 'software', 'ai', 'robot',
+            'business', 'office', 'meeting', 'team', 'work', 'success',
+            'money', 'finance', 'investment', 'growth', 'chart', 'data',
+            'nature', 'city', 'people', 'lifestyle', 'health', 'fitness',
+            'education', 'learning', 'book', 'study', 'innovation', 'future'
+        ]
+        
+        script_lower = script_text.lower()
+        for term in visual_terms:
+            if term in script_lower:
+                visual_keywords.append(term)
+        
+        # Also extract capitalized words (likely proper nouns/important terms)
+        words = re.findall(r'\b[A-Z][a-z]+\b', script_text)
+        visual_keywords.extend(words[:3])  # Add up to 3 capitalized terms
+        
+        return visual_keywords[:5]  # Return top 5 keywords
 
     async def organize_clips_by_duration(self, clips: List[str]) -> dict:
         """Organize clips by their duration for better sequencing"""

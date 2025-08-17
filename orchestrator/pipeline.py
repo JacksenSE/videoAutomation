@@ -293,11 +293,15 @@ class VideoGenerationPipeline:
         voiceover: Voiceover
     ) -> AssetBundle:
         """Gather B-roll clips and generate captions"""
-        # Get B-roll clips
+        # Get enhanced keywords from script for better visual matching
+        script_keywords = self.broll_provider.get_topic_keywords_from_script(script_package.script_text)
+        combined_keywords = list(set(idea.keywords + script_keywords))
+        
+        # Get B-roll clips and stock images
         video_clips = await self.broll_provider.fetch_broll_clips(
-            idea.keywords,
+            combined_keywords,
             script_package.title,
-            count=4,
+            count=6,  # Get more assets for enhanced composition
             duration_range=(6, 12)
         )
         
@@ -308,8 +312,8 @@ class VideoGenerationPipeline:
             voiceover
         )
         
-        # Optional: add background music (placeholder)
-        music_path = None  # Could fetch from music library
+        # Add royalty-free background music
+        music_path = await self._get_background_music(script_package.title)
         
         return AssetBundle(
             video_clips=video_clips,
@@ -326,7 +330,7 @@ class VideoGenerationPipeline:
         """Compose the final video"""
         try:
             render_result = await self.video_composer.compose_video(
-                voiceover, assets, render_spec
+                voiceover, assets, render_spec, script_package
             )
             
             # Clean up temp files
@@ -397,6 +401,81 @@ class VideoGenerationPipeline:
         )
         
         logger.info(f"Analytics collection scheduled for video {video_id}")
+
+    async def _get_background_music(self, title: str) -> Optional[str]:
+        """Get royalty-free background music based on video topic"""
+        try:
+            music_dir = os.path.join(self.content_root, "assets", "music")
+            os.makedirs(music_dir, exist_ok=True)
+            
+            # Check for existing music files
+            music_files = [
+                f for f in os.listdir(music_dir) 
+                if f.endswith(('.mp3', '.wav', '.m4a'))
+            ]
+            
+            if music_files:
+                # Select music based on title/topic
+                selected_music = self._select_music_for_topic(title, music_files)
+                return os.path.join(music_dir, selected_music)
+            else:
+                # Generate simple background music using FFmpeg
+                return await self._generate_simple_background_music(music_dir)
+                
+        except Exception as e:
+            logger.error(f"Error getting background music: {e}")
+            return None
+
+    def _select_music_for_topic(self, title: str, music_files: List[str]) -> str:
+        """Select appropriate music file based on video topic"""
+        title_lower = title.lower()
+        
+        # Simple music selection logic
+        if any(word in title_lower for word in ['tech', 'ai', 'future', 'innovation']):
+            tech_music = [f for f in music_files if 'tech' in f.lower() or 'electronic' in f.lower()]
+            if tech_music:
+                return tech_music[0]
+        
+        if any(word in title_lower for word in ['calm', 'meditation', 'peaceful']):
+            calm_music = [f for f in music_files if 'calm' in f.lower() or 'ambient' in f.lower()]
+            if calm_music:
+                return calm_music[0]
+        
+        # Default to first available music file
+        return music_files[0]
+
+    async def _generate_simple_background_music(self, music_dir: str) -> Optional[str]:
+        """Generate simple background music using FFmpeg"""
+        try:
+            music_filename = "default_bg_music.wav"
+            music_path = os.path.join(music_dir, music_filename)
+            
+            if os.path.exists(music_path):
+                return music_path
+            
+            # Generate simple ambient background music
+            cmd = [
+                'ffmpeg', '-y',
+                '-f', 'lavfi',
+                '-i', 'sine=frequency=220:duration=30',
+                '-f', 'lavfi', 
+                '-i', 'sine=frequency=330:duration=30',
+                '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=first,volume=0.1',
+                '-t', '30',
+                music_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                logger.info(f"Generated simple background music: {music_filename}")
+                return music_path
+            else:
+                logger.error(f"Error generating background music: {result.stderr}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error generating simple background music: {e}")
+            return None
 
     async def _update_job_topic(self, job_id: str, topic_id: str):
         """Update job with selected topic"""
