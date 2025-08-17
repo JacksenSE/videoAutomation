@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Channels - Auto Shorts</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 300;
+            margin-bottom: 10px;
+        }
+        
+        .nav {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .nav a {
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .nav a:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .channels-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+        }
+        
+        .channel-card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        .channel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        
+        .channel-name {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #2d3748;
+        }
+        
+        .channel-status {
+            padding: 5px 12px;
+            border-radius: 15px;
+            background: #c6f6d5;
+            color: #276749;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        
+        .channel-info {
+            margin: 15px 0;
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+        }
+        
+        .info-label {
+            font-weight: 500;
+            color: #4a5568;
+        }
+        
+        .info-value {
+            color: #2d3748;
+        }
+        
+        .banned-terms {
+            background: #fed7d7;
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        
+        .banned-terms-list {
+            font-size: 0.9rem;
+            color: #c53030;
+        }
+        
+        .channel-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5a67d8;
+        }
+        
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+        
+        .btn-secondary:hover {
+            background: #cbd5e0;
+        }
+        
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #38a169;
+        }
+        
+        .schedule-form {
+            background: #f7fafc;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        
+        .schedule-form input {
+            padding: 8px 12px;
+            border: 1px solid #cbd5e0;
+            border-radius: 4px;
+            margin: 0 10px;
+        }
+        
+        .schedule-form button {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Channel Management</h1>
+        </div>
+        
+        <div class="nav">
+            <a href="/">← Dashboard</a>
+            <a href="/jobs">View Jobs</a>
+        </div>
+        
+        <div class="channels-grid">
+            {% for channel_name, config in channels.items() %}
+            <div class="channel-card">
+                <div class="channel-header">
+                    <div class="channel-name">{{ channel_name }}</div>
+                    <div class="channel-status">Active</div>
+                </div>
+                
+                <div class="channel-info">
+                    <div class="info-row">
+                        <span class="info-label">Niche:</span>
+                        <span class="info-value">{{ config.niche }}</span>
+                    </div>
+                    
+                    <div class="info-row">
+                        <span class="info-label">Schedule:</span>
+                        <span class="info-value">Daily at {{ config.local_time }}</span>
+                    </div>
+                    
+                    <div class="info-row">
+                        <span class="info-label">Style:</span>
+                        <span class="info-value">{{ config.style }}</span>
+                    </div>
+                    
+                    {% if config.banned_terms %}
+                    <div class="banned-terms">
+                        <div class="info-label">Banned Terms:</div>
+                        <div class="banned-terms-list">
+                            {{ config.banned_terms | join(', ') }}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div class="schedule-form">
+                    <strong>Update Schedule:</strong><br>
+                    <input type="time" id="time-{{ channel_name }}" value="{{ config.local_time }}">
+                    <button onclick="updateSchedule('{{ channel_name }}')">Update</button>
+                </div>
+                
+                <div class="channel-actions">
+                    <button class="btn btn-primary" onclick="runNow('{{ channel_name }}')">
+                        Run Now
+                    </button>
+                    
+                    <button class="btn btn-secondary" onclick="dryRun('{{ channel_name }}')">
+                        Dry Run
+                    </button>
+                    
+                    <button class="btn btn-success" onclick="setupOAuth('{{ channel_name }}')">
+                        Setup OAuth
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <script>
+        async function runNow(channel) {
+            if (!confirm(`Run pipeline for ${channel} now?`)) return;
+            
+            try {
+                const response = await fetch('/run/once', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        channel: channel,
+                        delay_minutes: 0
+                    })
+                });
+                
+                if (response.ok) {
+                    alert('Pipeline started successfully!');
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.detail);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        async function dryRun(channel) {
+            try {
+                const response = await fetch('/dry-run', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        channel: channel
+                    })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    alert(`Dry run completed!\n\nTopic: ${result.selected_topic.title}\nScript: ${result.script.title}\nWord count: ${result.script.word_count}`);
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.detail);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        async function setupOAuth(channel) {
+            try {
+                const response = await fetch(`/oauth/youtube/init?channel=${channel}`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    window.open(result.auth_url, '_blank');
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.detail);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        async function updateSchedule(channel) {
+            const timeInput = document.getElementById(`time-${channel}`);
+            const newTime = timeInput.value;
+            
+            if (!newTime) {
+                alert('Please select a time');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/update-schedule', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        channel: channel,
+                        time: newTime,
+                        enabled: true
+                    })
+                });
+                
+                if (response.ok) {
+                    alert('Schedule updated successfully!');
+                    location.reload();
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.detail);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

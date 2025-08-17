@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jobs - Auto Shorts</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 300;
+            margin-bottom: 10px;
+        }
+        
+        .nav {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .nav a {
+            color: white;
+            text-decoration: none;
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .nav a:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .jobs-container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        .jobs-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        .jobs-table th {
+            background: #f7fafc;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #4a5568;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        
+        .jobs-table td {
+            padding: 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .jobs-table tr:hover {
+            background: #f7fafc;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .status-success {
+            background: #c6f6d5;
+            color: #276749;
+        }
+        
+        .status-failed {
+            background: #fed7d7;
+            color: #c53030;
+        }
+        
+        .status-running {
+            background: #feebc8;
+            color: #c05621;
+        }
+        
+        .status-pending {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+        
+        .job-id {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.8rem;
+            color: #718096;
+        }
+        
+        .video-link {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .video-link:hover {
+            text-decoration: underline;
+        }
+        
+        .error-message {
+            color: #e53e3e;
+            font-size: 0.9rem;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .filters {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .filter-select {
+            padding: 8px 12px;
+            border: 1px solid #cbd5e0;
+            border-radius: 8px;
+            background: white;
+        }
+        
+        .refresh-btn {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        
+        .refresh-btn:hover {
+            background: #5a67d8;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 50px;
+            color: #718096;
+        }
+        
+        .empty-state h3 {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Pipeline Jobs</h1>
+        </div>
+        
+        <div class="nav">
+            <a href="/">← Dashboard</a>
+            <a href="/channels">Channels</a>
+        
+        </div>
+        
+        <div class="jobs-container">
+            <div class="filters">
+                <select class="filter-select" id="statusFilter" onchange="filterJobs()">
+                    <option value="">All Statuses</option>
+                    <option value="success">Success</option>
+                    <option value="failed">Failed</option>
+                    <option value="running">Running</option>
+                    <option value="pending">Pending</option>
+                </select>
+                
+                <select class="filter-select" id="channelFilter" onchange="filterJobs()">
+                    <option value="">All Channels</option>
+                    {% for job in jobs %}
+                    <option value="{{ job.channel }}">{{ job.channel }}</option>
+                    {% endfor %}
+                </select>
+                
+                <button class="refresh-btn" onclick="location.reload()">
+                    Refresh
+                </button>
+            </div>
+            
+            {% if jobs %}
+            <table class="jobs-table">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Channel</th>
+                        <th>Status</th>
+                        <th>Started</th>
+                        <th>Completed</th>
+                        <th>Video</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in jobs %}
+                    <tr data-status="{{ job.status }}" data-channel="{{ job.channel }}">
+                        <td>
+                            <div class="job-id">{{ job.id[:8] }}...</div>
+                        </td>
+                        <td>{{ job.channel }}</td>
+                        <td>
+                            <span class="status-badge status-{{ job.status }}">
+                                {{ job.status }}
+                            </span>
+                        </td>
+                        <td>{{ job.started_at.strftime('%Y-%m-%d %H:%M') if job.started_at else '-' }}</td>
+                        <td>{{ job.completed_at.strftime('%Y-%m-%d %H:%M') if job.completed_at else '-' }}</td>
+                        <td>
+                            {% if job.video_id %}
+                            <a href="https://youtube.com/watch?v={{ job.video_id }}" 
+                               target="_blank" class="video-link">
+                                View Video
+                            </a>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if job.error_message %}
+                            <div class="error-message" title="{{ job.error_message }}">
+                                {{ job.error_message }}
+                            </div>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <h3>No jobs found</h3>
+                <p>Pipeline jobs will appear here once you start running the pipeline.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <script>
+        function filterJobs() {
+            const statusFilter = document.getElementById('statusFilter').value;
+            const channelFilter = document.getElementById('channelFilter').value;
+            const rows = document.querySelectorAll('tbody tr');
+            
+            rows.forEach(row => {
+                const status = row.getAttribute('data-status');
+                const channel = row.getAttribute('data-channel');
+                
+                const statusMatch = !statusFilter || status === statusFilter;
+                const channelMatch = !channelFilter || channel === channelFilter;
+                
+                if (statusMatch && channelMatch) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+        
+        // Auto-refresh every 30 seconds for running jobs
+        setInterval(() => {
+            const runningJobs = document.querySelectorAll('[data-status="running"]');
+            if (runningJobs.length > 0) {
+                location.reload();
+            }
+        }, 30000);
+    </script>
+</body>
+</html>
