@@ -330,7 +330,7 @@ class VideoGenerationPipeline:
         """Compose the final video"""
         try:
             render_result = await self.video_composer.compose_video(
-                voiceover, assets, render_spec
+                voiceover, assets, render_spec, script_package
             )
             
             # Clean up temp files
