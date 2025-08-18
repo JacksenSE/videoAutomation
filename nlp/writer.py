@@ -19,55 +19,58 @@ class ScriptWriter:
         )
         self.safety_checker = SafetyChecker()
 
-    async def create_script_package(
-        self, 
-        idea: TopicIdea, 
-        niche: str, 
-        banned_terms: List[str]
-    ) -> Optional[ScriptPackage]:
-        """Create complete script package from topic idea"""
-        try:
-            # Step 1: Idea → Outline
-            outline_result = await self._idea_to_outline(idea, niche)
-            if not outline_result:
-                return None
+    async def create_script_package(self, idea: TopicIdea, niche: str, banned_terms: List[str]) -> Optional[ScriptPackage]:
+        """Create complete script package from topic idea with retries"""
+        MAX_ATTEMPTS = 3
+        last_error = None
+        
+        for attempt in range(MAX_ATTEMPTS):
+            try:
+                # Step 1: Idea → Outline
+                outline_result = await self._idea_to_outline(idea, niche)
+                if not outline_result:
+                    continue
 
-            # Step 2: Select best hook and create script
-            best_hook = outline_result['hooks'][0]  # Use first hook
-            script_text = await self._outline_to_script(outline_result, best_hook)
-            if not script_text:
-                return None
+                # Step 2: Try different hooks
+                hook_index = min(attempt, len(outline_result['hooks']) - 1)
+                best_hook = outline_result['hooks'][hook_index]
+                script_text = await self._outline_to_script(outline_result, best_hook)
+                if not script_text:
+                    continue
 
-            # Step 3: Generate metadata
-            metadata = await self._generate_metadata(idea, script_text, niche)
-            if not metadata:
-                return None
+                # Step 3: Generate metadata
+                metadata = await self._generate_metadata(idea, script_text, niche)
+                if not metadata:
+                    continue
 
-            # Step 4: Safety check
-            is_safe = await self.safety_checker.check_content(
-                metadata['title'], script_text, niche, banned_terms
-            )
-            if not is_safe:
-                logger.warning(f"Content failed safety check for idea {idea.id}")
-                return None
+                # Step 4: Safety check
+                is_safe = await self.safety_checker.check_content(
+                    metadata['title'], script_text, niche, banned_terms
+                )
+                if not is_safe:
+                    logger.warning(f"Attempt {attempt+1}: Content failed safety check")
+                    continue
 
-            # Create script package
-            package = ScriptPackage(
-                topic_id=idea.id,
-                hook=best_hook,
-                script_text=script_text,
-                word_count=len(script_text.split()),
-                title=metadata['title'],
-                description=metadata['description'],
-                hashtags=metadata['hashtags']
-            )
+                # Create script package
+                return ScriptPackage(
+                    topic_id=idea.id,
+                    hook=best_hook,
+                    script_text=script_text,
+                    word_count=len(script_text.split()),
+                    title=metadata['title'],
+                    description=metadata['description'],
+                    hashtags=metadata['hashtags']
+                )
+            
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Attempt {attempt+1} failed: {e}")
+                continue
 
-            logger.info(f"Created script package for {idea.id}: {package.title}")
-            return package
-
-        except Exception as e:
-            logger.error(f"Error creating script package for {idea.id}: {e}")
-            return None
+        logger.error(f"All attempts failed for idea {idea.id}")
+        if last_error:
+            logger.error(f"Last error: {last_error}")
+        return None
 
     async def _idea_to_outline(self, idea: TopicIdea, niche: str) -> Optional[Dict]:
         """Convert topic idea to outline with hooks"""
@@ -134,7 +137,7 @@ class ScriptWriter:
             retry_prompt = (
                 prompt
                 + f"\n\nRewrite STRICTLY to {80}-{120} words. Current length: {wc}. "
-                  "Short sentences, no fluff. Keep the same message."
+                "Short sentences, no fluff. Keep the same message."
             )
             response = await self.client.chat.completions.create(
                 model="gpt-4o-mini",

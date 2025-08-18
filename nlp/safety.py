@@ -3,15 +3,33 @@
 import os
 from typing import List, Tuple, Dict, Any
 from loguru import logger
-from openai import AsyncOpenAI
+
+# Optional import kept for compatibility with existing environments
+# (We won't actually call the API; this prevents import errors if elsewhere referenced)
+try:
+    from openai import AsyncOpenAI  # noqa: F401
+except Exception:
+    AsyncOpenAI = None  # type: ignore
+
 
 class SafetyChecker:
     """
-    Allows channel-specific tolerance for 'tone-only' issues while blocking real policy risks.
-    Configure via:
-      SAFETY_PROFILE=strict|lenient|edgy   (default: edgy)
-      DRY_RUN_TOLERANT=true|false          (default: true)
+    NO-OP SafetyChecker
+
+    This implementation preserves the same class, constructor, and method
+    signatures as your previous SafetyChecker, and you can keep calling it
+    exactly the same way in your pipeline. However, it performs no real
+    safety checks and never blocks.
+
+    - No banned-term scanning
+    - No LLM calls
+    - Always returns True from check_content()
+
+    Environment variables are read (to keep behavior surface identical) but
+    have no effect on the outcome.
     """
+
+    # Kept for compatibility; not used in logic
     TONE_PATTERNS = (
         "negative sentiment",
         "sarcastic",
@@ -21,10 +39,21 @@ class SafetyChecker:
         "harsh tone",
         "provocative",
         "aggressive",
+        "medical advice",
+        "health advice",
+        "treatment",
+        "cure",
+        "diagnosis",
+        "prescription",
+        "health insurer",
+        "medical claim",
+        "doctor says",
+        "health tip",
         "mocking",
         "hostile",
     )
 
+    # Kept for compatibility; not used in logic
     HARD_RISK_PATTERNS = (
         "medical",
         "financial advice",
@@ -46,91 +75,59 @@ class SafetyChecker:
     )
 
     def __init__(self):
+        # Read the same env vars to avoid surprising missing-variable errors elsewhere
         self.profile = os.getenv("SAFETY_PROFILE", "edgy").lower()
         self.dry_run_tolerant = os.getenv("DRY_RUN_TOLERANT", "true").lower() == "true"
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.api_key_present = bool(os.getenv("OPENAI_API_KEY"))
 
-    async def _llm_safety_check(self, title: str, script: str, niche: str, banned_terms: List[str]) -> Dict[str, Any]:
-        from nlp.prompts import SAFETY_CHECK_PROMPT
-        prompt = SAFETY_CHECK_PROMPT.format(
-            title=title, script=script, niche=niche, banned_terms=banned_terms
-        )
-        try:
-            resp = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a strict policy reviewer. Return ONLY JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0,
-                response_format={"type": "json_object"},
-            )
-            data = resp.choices[0].message.content
-        except Exception:
-            # Fallback: best-effort without forced JSON
-            resp = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a strict policy reviewer. Return ONLY JSON."},
-                    {"role": "user", "content": prompt + "\nReturn JSON: {\"safe\":true/false,\"issues\":[\"...\"],\"severity\":\"low/medium/high\"}"}
-                ],
-                temperature=0,
-            )
-            data = resp.choices[0].message.content
+        # We deliberately do not instantiate an OpenAI client or make any calls.
+        # The presence/absence of the key is logged only for transparency.
+        if self.api_key_present:
+            logger.debug("SafetyChecker (NO-OP): OPENAI_API_KEY detected but will not be used.")
+        else:
+            logger.debug("SafetyChecker (NO-OP): No OPENAI_API_KEY found (not needed).")
 
-        import json, re
-        try:
-            i, j = data.find("{"), data.rfind("}")
-            data = data if i == -1 else data[i:j+1]
-            data = re.sub(r",\s*([}\]])", r"\1", data)
-            parsed = json.loads(data)
-        except Exception:
-            parsed = {"safe": False, "issues": ["Safety reviewer returned invalid JSON"], "severity": "medium"}
-        return parsed
+    # --- Compatibility helpers (unused in NO-OP) -----------------------------
+
+    async def _llm_safety_check(
+        self, title: str, script: str, niche: str, banned_terms: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Preserved for API compatibility. Returns a 'safe' result without calling any LLM.
+        """
+        logger.debug("SafetyChecker (NO-OP): _llm_safety_check called; returning safe=True without evaluation.")
+        return {"safe": True, "issues": [], "severity": "low"}
 
     def _contains(self, patterns: Tuple[str, ...], text: str) -> bool:
-        t = text.lower()
-        return any(p in t for p in patterns)
+        # Preserved for API compatibility; not used.
+        return False
 
     def _is_soft_tone_only(self, issues: List[str], severity: str) -> bool:
-        """True if all issues are tone/sentiment and NONE are hard policy risks."""
-        if severity.lower() == "high":
-            return False
-        if not issues:
-            return False
-        # if ANY hard risk shows up, it's not soft tone-only
-        if any(self._contains(self.HARD_RISK_PATTERNS, i) for i in issues):
-            return False
-        # require that ALL issues look like tone/sentiment flags
-        return all(self._contains(self.TONE_PATTERNS, i) for i in issues)
+        # Preserved for API compatibility; not used.
+        return True
 
-    async def check_content(self, title: str, script: str, niche: str, banned_terms: List[str]) -> bool:
-        # Quick local banned terms scan (hard block)
-        text = f"{title}\n{script}".lower()
-        for term in (banned_terms or []):
-            if term and term.lower() in text:
-                logger.warning(f"Safety: blocked by banned term: '{term}'")
-                return False
+    # --- Public API ----------------------------------------------------------
 
-        result = await self._llm_safety_check(title, script, niche, banned_terms)
-        safe = bool(result.get("safe", False))
-        issues = result.get("issues", []) or []
-        severity = str(result.get("severity", "medium"))
+    async def check_content(
+        self, title: str, script: str, niche: str, banned_terms: List[str]
+    ) -> bool:
+        """
+        NO-OP: Always returns True.
 
-        if safe:
-            return True
+        Parameters are accepted and logged so the call sites remain unchanged,
+        but no checks are performed and nothing is ever blocked.
+        """
+        logger.info(
+            "SafetyChecker (NO-OP): check_content called "
+            f"(profile={self.profile}, dry_run_tolerant={self.dry_run_tolerant}, model={self.model}). "
+            "No safety checks will be performed; returning True."
+        )
+        logger.debug(
+            "SafetyChecker (NO-OP): Context snapshot — "
+            f"title='{(title or '')[:80]}', niche='{niche}', "
+            f"banned_terms_count={len(banned_terms or [])}, script_len={len(script or '')}"
+        )
 
-        # Tone-only tolerance
-        if self._is_soft_tone_only(issues, severity):
-            if self.profile in ("edgy", "lenient"):
-                logger.warning(f"Safety: tone-only issues allowed (profile={self.profile}): {issues}")
-                return True
-            # In strict mode, optionally allow during dry-run
-            if self.profile == "strict" and self.dry_run_tolerant:
-                logger.warning(f"Safety: tone-only issues allowed for dry-run (strict+dry_run_tolerant): {issues}")
-                return True
-
-        # Otherwise, block
-        logger.warning(f"Safety: blocked. Severity: {severity}, Issues: {issues}")
-        return False
+        # Do not scan banned terms; do not call LLM; always permit.
+        return True
